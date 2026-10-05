@@ -1,1 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Site Seller</title>
+<style>
+:root{--bg:#000;--card:#111;--line:#262626;--tx:#f5f5f5;--mut:#9a9a9a;--ac:#22d3a0;--err:#ff6b6b;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.5;min-height:100vh}
+.wrap{max-width:760px;margin:0 auto;padding:20px 16px 40px}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
+.logo{font-size:1.4rem;font-weight:800}.logo span{color:var(--ac)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;margin-bottom:16px}
+h1{font-size:1.5rem;margin:0 0 6px}h2{font-size:1.15rem;margin:0 0 12px}
+p.sub{color:var(--mut);margin:0 0 18px}
+label{display:block;font-size:.85rem;color:var(--mut);margin:14px 0 6px}
+input,textarea{width:100%;background:#000;color:var(--tx);border:1px solid var(--line);border-radius:10px;padding:12px;font:inherit;font-size:16px}
+input:focus,textarea:focus{outline:2px solid var(--ac);border-color:transparent}
+textarea{min-height:130px;resize:vertical}
+.roles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.role{border:1px solid var(--line);border-radius:12px;padding:14px;text-align:center;cursor:pointer;background:#000;color:var(--tx);font:inherit;font-weight:600}
+.role small{display:block;color:var(--mut);font-weight:400}
+.role.on{border-color:var(--ac);background:#06201a}
+button.main{width:100%;margin-top:18px;background:var(--ac);color:#000;border:0;border-radius:10px;padding:13px;font:inherit;font-weight:700;cursor:pointer}
+button.main:disabled{opacity:.4;cursor:not-allowed}
+button.ghost{background:none;border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}
+button.danger{border-color:#5a2222;color:var(--err);margin-left:8px}
+.err{color:var(--err);font-size:.85rem;margin-top:8px;min-height:1em}
+.ok{color:var(--ac)}
+.count{font-size:.8rem;color:var(--mut);text-align:right;margin-top:4px}.count.ok{color:var(--ac)}
+.deal .top{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.meta{color:var(--mut);font-size:.82rem}
+.deal p{margin:8px 0 12px;white-space:pre-wrap;word-break:break-word}
+.deal a{display:inline-block;background:var(--ac);color:#000;text-decoration:none;font-weight:700;border-radius:8px;padding:8px 14px}
+.badge{background:#06201a;color:var(--ac);border-radius:99px;padding:2px 10px;font-size:.78rem;margin-right:6px}
+.warn{background:#2a1111;color:var(--err)}
+.empty{text-align:center;color:var(--mut);padding:30px 10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><div class="logo">Site<span>Seller</span></div><div id="hdr"></div></header>
+  <main id="app"></main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-app-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-auth-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-firestore-compat.min.js"></script>
+<script>
+(function(){
+var firebaseConfig={
+  apiKey:"AIzaSyB3hLTnJviiYcvy7I2R7JuDk6Nk8pJGTQA",
+  authDomain:"site-seller-2c2e1.firebaseapp.com",
+  projectId:"site-seller-2c2e1"
+};
+var ADMIN_EMAIL="a.y.singh001queen@gmail.com";
+var DAILY_LIMIT=3;
 
+var app=document.getElementById('app'),hdr=document.getElementById('hdr');
+var auth,db,user=null,profile=null,pending=null,role='buyer',requests=[],reports={},unsubs=[],ready=false,authErr='';
+var configured=firebaseConfig.apiKey.indexOf('PASTE')<0&&window.firebase;
+function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}
+function words(s){return s.trim()?s.trim().split(/\s+/).length:0}
+function ago(ts){var m=Math.floor((Date.now()-ts)/60000);if(m<1)return'just now';if(m<60)return m+' min ago';var h=Math.floor(m/60);return h<24?h+' h ago':Math.floor(h/24)+' d ago'}
+function normPhone(p){var d=p.replace(/[^\d+]/g,'');if(d[0]==='+')return d;return d.length===10?'+91'+d:'+'+d}
+function isAdmin(){return user&&user.email===ADMIN_EMAIL}
+function reported(id){try{return(JSON.parse(localStorage.getItem('ss_rep')||'[]')).indexOf(id)>-1}catch(e){return false}}
+function markReported(id){try{var a=JSON.parse(localStorage.getItem('ss_rep')||'[]');a.push(id);localStorage.setItem('ss_rep',JSON.stringify(a))}catch(e){}}
+
+function logoutBtn(){var b=el('button','ghost','Log out');b.onclick=function(){auth.signOut()};hdr.appendChild(b)}
+
+function render(){
+  hdr.textContent='';app.textContent='';
+  if(!configured){var c=el('div','card');c.appendChild(el('h1',0,'Setup needed'));c.appendChild(el('p','sub','Paste your Firebase values at the top of this file.'));app.appendChild(c);return}
+  if(!ready){app.appendChild(el('div','empty','Loading...'));return}
+  if(user&&!profile){logoutBtn();return profileView()}
+  if(!profile)return loginView();
+  logoutBtn();
+  profile.role==='buyer'?buyerView():sellerView();
+}
+
+function roleRow(c){
+  var rs=el('div','roles'),bb=el('button','role','Site Buyer'),sb=el('button','role','Site Seller');
+  bb.type=sb.type='button';
+  bb.appendChild(el('small',0,'I want to buy a site'));sb.appendChild(el('small',0,'I want to sell a site'));
+  function pick(r){role=r;bb.className='role'+(r==='buyer'?' on':'');sb.className='role'+(r==='seller'?' on':'')}
+  bb.onclick=function(){pick('buyer')};sb.onclick=function(){pick('seller')};pick(role);
+  rs.append(bb,sb);c.appendChild(el('label',0,'I am a'));c.appendChild(rs);
+}
+
+function fields(c,list){
+  var f={};
+  list.forEach(function(a){c.appendChild(el('label',0,a[1]));var i=el('input');i.type=a[2];i.placeholder=a[3];f[a[0]]=i;c.appendChild(i)});
+  return f;
+}
+
+function loginView(){
+  var c=el('div','card');
+  c.appendChild(el('h1',0,'Welcome to Site Seller'));
+  c.appendChild(el('p','sub','Buy or sell websites. We verify your email with a one-time link.'));
+  roleRow(c);
+  var f=fields(c,[['name','Name','text','Your full name'],['place','Place','text','City / Town'],['phone','Phone number','tel','10-digit number'],['email','Gmail / Email','email','you@gmail.com']]);
+  var er=el('div','err',authErr),go=el('button','main','Send verification link');
+  go.onclick=function(){
+    var n=f.name.value.trim(),p=f.place.value.trim(),ph=normPhone(f.phone.value),em=f.email.value.trim().toLowerCase();
+    if(!n||!p){er.textContent='Please enter your name and place.';return}
+    if(!/^\+\d{11,14}$/.test(ph)){er.textContent='Enter a valid phone number.';return}
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){er.textContent='Enter a valid email.';return}
+    er.className='err';er.textContent='Sending...';go.disabled=true;
+    try{localStorage.setItem('ss_pending',JSON.stringify({name:n,place:p,phone:ph,role:role,email:em}));localStorage.setItem('ss_email',em)}catch(e){}
+    auth.sendSignInLinkToEmail(em,{url:location.origin+location.pathname,handleCodeInApp:true}).then(function(){
+      app.textContent='';var d=el('div','card');d.appendChild(el('h1',0,'Check your inbox 📩'));
+      d.appendChild(el('p','sub','We sent a login link to '+em+'. Open it in Chrome. If you do not see it, check Spam.'));app.appendChild(d);
+    }).catch(function(e){go.disabled=false;er.textContent='Could not send email ('+(e.code||'error')+').'});
+  };
+  c.append(er,go);app.appendChild(c);
+}
+
+function profileView(){
+  var c=el('div','card');
+  c.appendChild(el('h1',0,'Complete your profile'));
+  c.appendChild(el('p','sub','Your email '+user.email+' is verified. Add your details to continue.'));
+  roleRow(c);
+  var f=fields(c,[['name','Name','text','Your full name'],['place','Place','text','City / Town'],['phone','Phone number','tel','10-digit number']]);
+  var er=el('div','err',authErr),go=el('button','main','Save and continue');
+  go.onclick=function(){
+    var n=f.name.value.trim(),p=f.place.value.trim(),ph=normPhone(f.phone.value);
+    if(!n||!p){er.textContent='Please enter your name and place.';return}
+    if(!/^\+\d{11,14}$/.test(ph)){er.textContent='Enter a valid phone number.';return}
+    go.disabled=true;er.className='err';er.textContent='Saving...';
+    var pr={name:n,place:p,phone:ph,role:role,email:user.email};
+    db.collection('users').doc(user.uid).set(pr).then(function(){
+      authErr='';profile=pr;start();render();
+    }).catch(function(e){go.disabled=false;er.textContent='Could not save ('+(e.code||'error')+'). Check Firestore rules.'});
+  };
+  c.append(er,go);app.appendChild(c);
+}
+
+function todayCount(){var s=new Date();s.setHours(0,0,0,0);return requests.filter(function(r){return r.uid===user.uid&&r.ts>=s.getTime()}).length}
+
+function buyerView(){
+  var c=el('div','card');
+  c.appendChild(el('h1',0,'Hi '+profile.name+' 👋'));
+  c.appendChild(el('p','sub','Describe the site you want to buy (minimum 30 words). Verified sellers will contact you.'));
+  var t=el('textarea');t.placeholder='e.g. I want a profitable e-commerce site in the fashion niche with steady monthly traffic, a clean design, active social media, and an easy handover...';
+  var ct=el('div','count','0 / 30 words'),er=el('div','err'),go=el('button','main','Post my requirement');go.disabled=true;
+  t.oninput=function(){var w=words(t.value);ct.textContent=w+' / 30 words';ct.className='count'+(w>=30?' ok':'');go.disabled=w<30};
+  go.onclick=function(){
+    var d=t.value.trim();
+    if(words(d)<30)return;
+    if(d.length>2000){er.className='err';er.textContent='Too long (max 2000 characters).';return}
+    if(todayCount()>=DAILY_LIMIT){er.className='err';er.textContent='Daily limit reached ('+DAILY_LIMIT+' posts). Try again tomorrow.';return}
+    go.disabled=true;
+    db.collection('requests').add({uid:user.uid,name:profile.name,place:profile.place,phone:profile.phone,desc:d,ts:Date.now()}).then(function(){
+      t.value='';t.oninput();er.className='err ok';er.textContent='Posted! Sellers can now see your requirement.';
+    }).catch(function(){er.className='err';er.textContent='Could not post. Please try again.';go.disabled=false});
+  };
+  c.append(t,ct,er,go);app.appendChild(c);
+  app.appendChild(el('h2',0,'My requirements'));
+  var l=el('div');l.id='list';app.appendChild(l);list();
+}
+
+function sellerView(){
+  var c=el('div','card');
+  c.appendChild(el('h1',0,'Available deals'));
+  c.appendChild(el('p','sub','Buyers looking for websites right now, '+profile.name+'.'));
+  var s=el('input');s.placeholder='Search by keyword or place';s.id='q';s.oninput=list;
+  c.appendChild(s);app.appendChild(c);
+  var l=el('div');l.id='list';app.appendChild(l);list();
+}
+
+function list(){
+  var l=document.getElementById('list');if(!l||!profile)return;l.textContent='';
+  var q=(document.getElementById('q')||{value:''}).value.toLowerCase();
+  var items=requests.filter(function(r){
+    if(profile.role==='buyer')return r.uid===user.uid;
+    return !q||(r.desc+' '+r.place+' '+r.name).toLowerCase().indexOf(q)>-1;
+  }).sort(function(a,b){return b.ts-a.ts});
+  if(!items.length){l.appendChild(el('div','empty',profile.role==='buyer'?'You have not posted anything yet.':'No deals yet. Check back soon.'));return}
+  items.forEach(function(r){
+    var d=el('div','card deal'),top=el('div','top');
+    top.appendChild(el('b',0,r.name));top.appendChild(el('span','meta','📍 '+r.place+' · '+ago(r.ts)));
+    d.appendChild(top);d.appendChild(el('span','badge','✓ Verified email'));
+    if(isAdmin()&&reports[r.id])d.appendChild(el('span','badge warn','⚠ '+reports[r.id]+' report(s)'));
+    d.appendChild(el('p',0,r.desc));
+    if(profile.role==='seller'){var a=el('a',0,'Call buyer · '+r.phone);a.href='tel:'+r.phone;d.appendChild(a)}
+    if(profile.role==='seller'&&r.uid!==user.uid){
+      var rp=el('button','ghost danger',reported(r.id)?'Reported':'Report');rp.disabled=reported(r.id);
+      rp.onclick=function(){
+        db.collection('reports').add({rid:r.id,reporter:user.uid,ts:Date.now()}).then(function(){markReported(r.id);rp.textContent='Reported';rp.disabled=true});
+      };d.appendChild(rp);
+    }
+    if(r.uid===user.uid||isAdmin()){
+      var del=el('button','ghost danger','Delete');
+      del.onclick=function(){if(confirm('Delete this post?'))db.collection('requests').doc(r.id).delete()};d.appendChild(del);
+    }
+    l.appendChild(d);
+  });
+}
+
+function stop(){unsubs.forEach(function(u){u()});unsubs=[];requests=[];reports={}}
+function start(){
+  stop();
+  unsubs.push(db.collection('requests').onSnapshot(function(s){
+    requests=s.docs.map(function(x){var d=x.data();d.id=x.id;return d});list();
+  }));
+  if(isAdmin())unsubs.push(db.collection('reports').onSnapshot(function(s){
+    reports={};s.docs.forEach(function(x){var r=x.data().rid;reports[r]=(reports[r]||0)+1});list();
+  }));
+}
+
+if(configured){
+  firebase.initializeApp(firebaseConfig);auth=firebase.auth();db=firebase.firestore();
+  if(auth.isSignInWithEmailLink(location.href)){
+    try{pending=JSON.parse(localStorage.getItem('ss_pending')||'null')}catch(e){}
+    var em=localStorage.getItem('ss_email')||prompt('Confirm your email to finish logging in');
+    auth.signInWithEmailLink(em,location.href).then(function(){
+      try{localStorage.removeItem('ss_pending');localStorage.removeItem('ss_email')}catch(e){}
+      history.replaceState(null,'',location.pathname);
+    }).catch(function(e){
+      pending=null;authErr='Login link failed ('+(e.code||'error')+'). Please request a new link.';
+      history.replaceState(null,'',location.pathname);ready=true;render();
+    });
+  }
+  auth.onAuthStateChanged(function(u){
+    stop();user=u;profile=null;
+    if(!u){ready=true;return render()}
+    var ref=db.collection('users').doc(u.uid);
+    var p=pending?ref.set(pending).then(function(){var x=pending;pending=null;return x}):ref.get().then(function(d){return d.exists?d.data():null});
+    p.then(function(pr){
+      profile=pr||null;if(profile){authErr='';start()}
+      ready=true;render();
+    }).catch(function(e){
+      pending=null;authErr='Database error ('+(e.code||'unknown')+'). Check Firestore rules.';ready=true;render();
+    });
+  });
+} else {ready=true}
+render();
+})();
+</script>
+</body>
+</html>
